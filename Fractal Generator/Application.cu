@@ -136,16 +136,67 @@ int HEIGHT = 2000;
 double maxIterations = 100;
 
 double min_valx = -2;
-double max_valx = 2;
+double max_valx = 0;
 
-double min_valy = -2;
-double max_valy = 2;
+double min_valy = -1;
+double max_valy = 1;
 
+float *d_data;
 float *texData;
+
+int threadsPerBlock = 512;
+int blocksPerGrid = (int)ceil((float)(WIDTH*HEIGHT) / (float)(threadsPerBlock));
+
+__device__ double d_map(double x, double in_min, double in_max, double out_min, double out_max)
+{
+	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+__global__ void cudaFractalGenerate(int width, int height, int maxIterations, double min_valx, double max_valx, double min_valy, double max_valy, float* d_data) {
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (idx < width*height) {
+		int x = idx % width;
+		int y = (int)floorf(idx / width);
+
+		double a = d_map(x, 0, width, min_valx, max_valx);
+		double b = d_map(y, 0, height, min_valy, max_valy);
+
+		double ca = a;
+		double cb = b;
+		double n = 0;
+		while (n < maxIterations) {
+			double aa = a * a - b * b;
+			double bb = 2 * a * b;
+
+			a = aa + ca;
+			b = bb + cb;
+			if (a*a + b * b > 4) {
+				break;
+			}
+			n++;
+		}
+		double col = d_map(n, 0, maxIterations, 0, 1);
+		col = d_map((double)sqrtf(col), 0, 1, 0, 360);
+		d_data[idx * 3 + 0] = (float)col;
+		d_data[idx * 3 + 1] = 1.0f;
+		d_data[idx * 3 + 2] = n == maxIterations ? 0 : 1.0f;
+	}
+}
 
 double map(double x, double in_min, double in_max, double out_min, double out_max)
 {
 	return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+void render() {
+	cudaMalloc((void**)&d_data, sizeof(float) * (WIDTH * HEIGHT * 3));
+
+	cudaFractalGenerate << <blocksPerGrid, threadsPerBlock >> > (WIDTH, HEIGHT, maxIterations, min_valx, max_valx, min_valy, max_valy, d_data);
+	cudaDeviceSynchronize();
+
+	cudaMemcpy(texData, d_data, sizeof(float)*(WIDTH*HEIGHT * 3), cudaMemcpyDeviceToHost);
+	cudaFree(d_data);
 }
 
 int main() {
@@ -161,54 +212,12 @@ int main() {
 		-1.0f,  1.0f,   0.0f, 0.0f
 	};
 
-	unsigned int indicies[] {
+	unsigned int indicies[]{
 		0, 1, 2,
 		2, 3, 0
 	};
 
 	texData = (float*)malloc(sizeof(float)*(WIDTH*HEIGHT * 3));
-
-	for (int i = 0; i < WIDTH*HEIGHT; i++) {
-		texData[i * 3] = 0.0f;
-		texData[i * 3 + 1] = 1.0f;
-		texData[i * 3 + 2] = 0.7f;
-	}
-
-	for (int x = 0; x < WIDTH; x++) {
-		for (int y = 0; y < HEIGHT; y++) {
-			double a = map(x, 0, WIDTH, min_valx, max_valx);
-			double b = map(y, 0, HEIGHT, min_valy, max_valy);
-
-			double ca = a;
-			double cb = b;
-			double n = 0;
-			while (n < maxIterations) {
-				double aa = a * a - b * b;
-				double bb = 2 * a * b;
-
-				a = aa + ca;
-				b = bb + cb;
-				if (a*a + b*b > 4) {
-					break;
-				}
-				n++;
-			}
-			double col = map(n, 0, maxIterations, 0, 1);
-			col = map(sqrt(col), 0, 1, 0, 360);
-			hsv color1;
-			color1.h = col;
-			color1.s = 1;
-			color1.v = n == maxIterations ? 0 : 1;
-
-			rgb color2;
-			color2 = hsv2rgb(color1);
-			texData[(x + (y*WIDTH)) * 3 + 0] = (float)color2.r;
-			texData[(x + (y*WIDTH)) * 3 + 1] = (float)color2.g;
-			texData[(x + (y*WIDTH)) * 3 + 2] = (float)color2.b;
-		}
-	}
-
-
 
 	unsigned int buffer;
 	glGenBuffers(1, &buffer);
@@ -235,9 +244,32 @@ int main() {
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, WIDTH, HEIGHT, 0, GL_RGB, GL_FLOAT, texData);
-
 	while (!display.isClosed()) {
+
+		if (display.needToDraw) {
+			if (maxIterations < 0) {
+				maxIterations = 0;
+			}
+			maxIterations += (((int)maxIterations / 10)+1)*(display.getWheel());
+			printf("%f \n", maxIterations);
+			render();
+
+			for (int i = 0; i < WIDTH*HEIGHT; i++) {
+				hsv color1;
+				color1.h = texData[i * 3 + 0];
+				color1.s = texData[i * 3 + 1];
+				color1.v = texData[i * 3 + 2];
+				rgb color2;
+				color2 = hsv2rgb(color1);
+				texData[i * 3 + 0] = (float)color2.r;
+				texData[i * 3 + 1] = (float)color2.g;
+				texData[i * 3 + 2] = (float)color2.b;
+			}
+
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB8, WIDTH, HEIGHT, 0, GL_RGB, GL_FLOAT, texData);
+			display.needToDraw = false;
+		}
+
 		glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 		display.Update();
 	}

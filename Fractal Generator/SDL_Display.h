@@ -13,7 +13,11 @@ public:
 	bool isClosed();
 	void Clear(float r, float g, float b, float a);
 	SDL_Window* m_window;
+	signed int getWheel();
+	bool needToDraw;
 private:
 	SDL_GLContext m_glContext;
 	bool m_isClosed;
+	signed int wheel;
+	void setWheel(signed int val);
 };

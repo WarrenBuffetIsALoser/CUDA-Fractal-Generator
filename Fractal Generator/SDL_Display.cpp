@@ -23,6 +23,7 @@ Display::Display(int width, int height, const std::string& title)
 		std::cerr << "Failed to initialize glew" << std::endl;
 	}
 	m_isClosed = false;
+	needToDraw = true;
 }
 
 Display::~Display()
@@ -43,11 +44,27 @@ void Display::Update() {
 		else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_RESIZED) {
 			glViewport(0, 0, e.window.data1, e.window.data2);
 		}
+		
+		if (e.type == SDL_MOUSEWHEEL) {
+			setWheel(e.wheel.y);
+			needToDraw = true;
+		}
+		else {
+			setWheel(0);
+		}
 	}
 }
 
 bool Display::isClosed() {
 	return m_isClosed;
+}
+
+void Display::setWheel(signed int val) {
+	wheel = val;
+}
+
+signed int Display::getWheel() {
+	return wheel;
 }
 
 void Display::Clear(float r, float g, float b, float a) {
