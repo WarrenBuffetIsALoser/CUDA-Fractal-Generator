@@ -251,7 +251,6 @@ int main() {
 				maxIterations = 0;
 			}
 			maxIterations += (((int)maxIterations / 10)+1)*(display.getWheel());
-			printf("%f \n", maxIterations);
 			render();
 
 			for (int i = 0; i < WIDTH*HEIGHT; i++) {
